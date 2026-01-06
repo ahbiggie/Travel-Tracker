@@ -65,20 +65,31 @@ app.get("/", async (req, res) => {
   });
 
 });
-// POSt route to add a new visited country
+// POST route to add a new visited country
 app.post("/add", async (req, res) => {
-  // Extract country name from request body
-  const countryName = req.body.country_name;
+  // Extract country code from request body
+  const input = req.body["country"];
   try {
-    // Insert new country into visited_countries table
-    await db.query("INSERT INTO visited_countries (country_name) VALUES ($1)"), [countryName];
-    // Redirect to home page after successful insertion
-    res.redirect("/");
+    // LOOKUP the country code in the database and insert it if not already present
+    const result = await db.query("SELECT country_code FROM visited_countries WHERE country_name ILIKE $1", [input]);
+
+    if (result.rows.length !== 0) {
+      // Country found, insert into visited_countries table
+      const countryCode = result.rows[0].country_code;
+
+      // INSERT the countryCode into visited_countries table
+      await db.query("INSERT INTO visited_countries (country_code) VALUES ($1)", [countryCode]);
+      res.redirect("/");
+    } else {
+      // Country not found, send error response
+      res.send("Country not found, try again.");
+    }
+
   } catch (err) {
     console.error("Error adding country:", err);
     res.status(500).send("Internal Server Error");
   }
-})
+});
 
 
 
