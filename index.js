@@ -33,23 +33,10 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
 /**
- * Test query to verify database connection
- * Retrieves all records from visited_countries table
+ * Function to check visited countries from the database
+ * @returns {Promise<Array>} - Array of country codes of visited countries
  */
-db.query("SELECT * FROM visited_countries", (err, res) => {
-  if (err) {
-    console.error("Database query error:", err);
-  } else {
-    console.log("Visited countries:", res.rows);
-  }
-})
-
-/**
- * GET route for home page
- * Fetches all visited countries from database and renders the main page
- * @route GET /
- */
-app.get("/", async (req, res) => {
+async function checkVisited() {
   // Query database for country codes of all visited countries
   const result = await db.query("SELECT country_code FROM visited_countries");
 
@@ -58,8 +45,19 @@ app.get("/", async (req, res) => {
 
   // Extract country codes from query result and populate array
   result.rows.forEach((country) => {
-    countries.push(country.country_code); // Fixed: removed 'countries =' and fixed property name
+    countries.push(country.country_code);
   });
+  return countries;
+}
+
+/**
+ * GET route for home page
+ * Fetches all visited countries from database and renders the main page
+ * @route GET /
+ */
+app.get("/", async (req, res) => {
+  // Fetch visited countries from the database
+  const countries = await checkVisited();
 
   // Render the main page with the list of visited countries
   res.render("index.ejs", {
@@ -78,40 +76,56 @@ app.post("/add", async (req, res) => {
   const input = req.body["country"];
 
   try {
-    // Look up the country code from the countries table by country name
+    // Look up the country code from the countries table by country name (case-insensitive, partial match)
     const result = await db.query(
+      // Fetch country name for case-insensitive partial match
       "SELECT country_code FROM countries WHERE LOWER(country_name) LIKE '%' || $1 || '%'",
       [input.toLowerCase()]
     );
 
     // Check if country was found in the database
-    if (result.rows.length !== 0) {
-      // Country found, extract the country code
-      const countryCode = result.rows[0].country_code;
-
-      try {
-        // Insert the country code into visited_countries table
-        await db.query(
-          "INSERT INTO visited_countries (country_code) VALUES ($1)",
-          [countryCode]
-        );
-        // Redirect to home page to show updated list
-        res.redirect("/");
-      } catch (insertErr) {
-        // Handle duplicate entry error (country already visited)
-        console.log("Insert error:", insertErr);
-        res.send("Country has already been added, try again.");
-      }
-    } else {
-      // Country not found in countries table
-      res.send("Country not found, try again.");
+    if (result.rows.length === 0) {
+      const countries = await checkVisited();
+      return res.render("index.ejs", {
+        countries: countries,
+        total: countries.length,
+        error: "Country name does not exist, try again.",
+      });
     }
+    // Country found, extract the country code
+    const countryCode = result.rows[0].country_code;
 
+    try {
+      // Insert the country code into visited_countries table
+      await db.query(
+        "INSERT INTO visited_countries (country_code) VALUES ($1)",
+        [countryCode]
+      );
+      // Redirect to home page to show updated list
+      res.redirect("/");
+    } catch (err) {
+      // Handle duplicate entry error (country already visited)
+      console.log(err);
+      // Rerender index.ejs with countries That are already visited and length and error message
+      const countries = await checkVisited();
+      res.render("index.ejs", {
+        countries: countries,
+        total: countries.length,
+        error: "Country has already been added, try again.",
+      })
+    }
   } catch (err) {
-    // Handle any other database errors
-    console.error("Error adding country:", err);
-    res.status(500).send("Internal Server Error");
+    // Country not found in countries table
+    console.log(err);
+    // Rerender index.ejs with countries and length and error message
+    const countries = await checkVisited();
+    res.render("index.ejs", {
+      countries: countries,
+      total: countries.length,
+      error: "Country name does not exist, try again.",
+    })
   }
+
 });
 
 /**
